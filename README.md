@@ -2,7 +2,7 @@
 
 Projeto desenvolvido para simulação de navegação autônoma utilizando o algoritmo **Dynamic Window Approach (DWA)** integrado ao **CoppeliaSim** através de Python.
 
-O objetivo principal do projeto foi implementar um sistema de desvio de obstáculos em tempo real utilizando uma base móvel Pioneer P3DX já disponibilizada na cena do simulador.
+O objetivo principal do projeto foi implementar um sistema de desvio de obstáculos em tempo real utilizando uma base móvel já disponibilizada na cena do simulador.
 
 ---
 
