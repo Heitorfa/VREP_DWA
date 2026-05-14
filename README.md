@@ -16,8 +16,7 @@ Implementar e testar um algoritmo de navegação local baseado em DWA capaz de:
 - utilizar sensores ultrassônicos da plataforma Pioneer;
 - integrar Python com o CoppeliaSim.
 
-Além disso, foram realizadas modificações no algoritmo original para melhorar o comportamento do robô em ambientes mais fechados e reduzir problemas de travamento em obstáculos.
-
+Além disso, foram realizadas modificações no algoritmo original para melhorar o comportamento do robô em ambientes mais fechados e reduzir problemas de travamento em obstáculos. Com isso ainda está em melhoria o algoritmo DWA, alguns problemas ainda são vistos nos testes, como por exemplo quando o robô está em uma situação entre a parede e uma coluna, ele não "se sai" muito bem nessa situação. Com o tempo o algoritmo vai ser melhorado.
 ---
 
 # Tecnologias Utilizadas
@@ -139,7 +138,6 @@ Durante os testes foram observados alguns problemas típicos de algoritmos reati
 ---
 
 # Possíveis Melhorias Futuras
-
 - utilização de SLAM;
 - criação de mapa do ambiente;
 - planejamento global;
