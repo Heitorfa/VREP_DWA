@@ -1,4 +1,4 @@
-# Dynamic Window Approach aplicado ao Pioneer P3DX no CoppeliaSim
+# Dynamic Window Approach aplicado a Base Funcional no CoppeliaSim
 
 Projeto desenvolvido para simulação de navegação autônoma utilizando o algoritmo **Dynamic Window Approach (DWA)** integrado ao **CoppeliaSim** através de Python.
 
