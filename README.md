@@ -1,161 +1,33 @@
-# Dynamic Window Approach aplicado a Base Funcional no CoppeliaSim
+# Navegação Autônoma de Robôs Móveis com A* e DWA no CoppeliaSim
 
-Projeto desenvolvido para simulação de navegação autônoma utilizando o algoritmo **Dynamic Window Approach (DWA)** integrado ao **CoppeliaSim** através de Python.
+Este repositório contém a implementação de um sistema híbrido de navegação autônoma para robôs móveis operando em ambiente simulado no CoppeliaSim. A arquitetura desenvolvida integra um planejador global de caminhos baseado no algoritmo **A*** com um controlador reativo local fundamentado na **Abordagem de Janela Dinâmica (Dynamic Window Approach - DWA)**. A comunicação e o controle do simulador são realizados em tempo real utilizando a **ZeroMQ Remote API** do CoppeliaSim.
 
-O objetivo principal do projeto foi implementar um sistema de desvio de obstáculos em tempo real utilizando uma base móvel já disponibilizada na cena do simulador.
+## 🚀 Funcionalidades
 
----
+- **Mapeamento e Planejamento Global (A*):** Varre a árvore de objetos do cenário para identificar obstáculos estáticos, inflar margens de segurança com base no raio do robô e gerar uma malha de waypoints otimizada até o objetivo final.
+- **Navegação Reativa Local (DWA):** Amostra o espaço de velocidades lineares e angulares dentro das restrições dinâmicas do robô, prevendo trajetórias e minimizando uma função de custo multiobjetivo.
+- **Fusão de Sensores em Tempo Real:** Combina a geometria de obstáculos estáticos mapeados com leituras dinâmicas de sensores de proximidade ultrassônicos para evasão de colisões imprevistas.
+- **Salvaguarda Mecânica (Controle de Emergência):** Em cenários de bloqueio ou alto custo de colisão, o controlador assume uma manobra de rotação forçada no próprio eixo para reorientar a base móvel.
 
-# Objetivo
+## 📁 Estrutura do Projeto
 
-Implementar e testar um algoritmo de navegação local baseado em DWA capaz de:
+O sistema é dividido em dois módulos principais interdependentes:
 
-- mover o robô até um alvo;
-- evitar obstáculos de forma autônoma;
-- gerar trajetórias em tempo real;
-- utilizar sensores ultrassônicos da plataforma Pioneer;
-- integrar Python com o CoppeliaSim.
+1. **`script_mirror.py` (Módulo de Integração e Simulação):** - Gerencia o ciclo de vida da simulação no CoppeliaSim.
+   - Realiza a varredura do ambiente para extração de obstáculos estáticos e leitura dos sensores de proximidade.
+   - Implementa o loop principal de controle e faz o rastreamento de progresso ao longo dos waypoints gerados pelo A*.
+2. **`dynamic_window_approach.py` (Módulo Algorítmico):**
+   - Contém a classe `AStarPlanner` para o cálculo da rota global ideal.
+   - Contém a classe `DWAController` responsável pelo cálculo do espaço vetorial de comandos válidos $[v, \omega]$, simulação de trajetórias dinâmicas futuras e minimização das funções de custo.
 
-Além disso, foram realizadas modificações no algoritmo original para melhorar o comportamento do robô em ambientes mais fechados e reduzir problemas de travamento em obstáculos. Com isso ainda está em melhoria o algoritmo DWA, alguns problemas ainda são vistos nos testes, como por exemplo quando o robô está em uma situação entre a parede e uma coluna, ele não "se sai" muito bem nessa situação. Com o tempo o algoritmo vai ser melhorado.
----
+## 🛠️ Pré-requisitos
 
-# Tecnologias Utilizadas
+Antes de executar, certifique-se de possuir as seguintes ferramentas instaladas:
 
-- Python 3
-- CoppeliaSim
+- Python 3.8 ou superior
 - NumPy
-- Matplotlib
-- ZeroMQ Remote API
+- CoppeliaSim (versão moderna compatível com ZeroMQ Remote API)
 
----
-
-# Estrutura do Projeto
-
-```text
-.
-├── lib/
-│   ├── dynamic_window_approach.py
-│   └── script_mirror.py
-│
-├── scenes/
-│   └── cena.ttt
-│
-└── README.md
-```
-
----
-
-# Funcionamento do Sistema
-
-O sistema funciona da seguinte forma:
-
-1. O CoppeliaSim executa a cena contendo:
-   - Pioneer P3DX;
-   - sensores ultrassônicos;
-   - obstáculos;
-   - alvo.
-
-2. O script Python conecta-se ao simulador utilizando a API remota.
-
-3. Os sensores do robô detectam obstáculos em tempo real.
-
-4. O algoritmo DWA:
-   - prevê várias trajetórias possíveis;
-   - calcula custos;
-   - escolhe o melhor movimento;
-   - envia velocidades para as rodas.
-
-5. O robô navega até o alvo desviando dos obstáculos.
-
----
-
-# Melhorias Implementadas no DWA
-
-O algoritmo original foi modificado para melhorar o comportamento do robô na simulação.
-
-Entre as alterações realizadas:
-
-- suavização do custo de obstáculos;
-- redução de oscilações;
-- prevenção de rotação infinita;
-- escape de mínimos locais;
-- ajuste dinâmico de pesos;
-- redução automática de velocidade próximo a obstáculos;
-- comportamento inspirado em robôs aspiradores.
-
-Essas modificações tornaram a navegação mais estável e natural dentro do ambiente simulado.
-
----
-
-# Como Executar
-
-## 1. Abrir o CoppeliaSim
-
-Carregue a cena `.ttt` contendo:
-- Pioneer P3DX;
-- obstáculos;
-- objeto Target.
-
----
-
-## 2. Iniciar a simulação
-
-Clique no botão **Play** dentro do CoppeliaSim.
-
----
-
-## 3. Executar o Python
-
-No terminal:
-
+Instale as dependências via pip:
 ```bash
-python script_mirror.py
-```
-
----
-
-# Sensores Utilizados
-
-O robô utiliza sensores ultrassônicos do próprio Pioneer P3DX para:
-
-- detectar obstáculos;
-- estimar distâncias;
-- auxiliar no cálculo das trajetórias.
-
----
-
-# Resultados
-
-O sistema foi capaz de:
-
-- navegar autonomamente;
-- evitar obstáculos;
-- recalcular trajetórias em tempo real;
-- alcançar o alvo em diferentes cenários.
-
-Durante os testes foram observados alguns problemas típicos de algoritmos reativos, como mínimos locais, que foram parcialmente corrigidos através de ajustes no DWA.
-
----
-
-# Possíveis Melhorias Futuras
-- utilização de SLAM;
-- criação de mapa do ambiente;
-- planejamento global;
-- integração com ROS;
-- uso de LiDAR;
-- navegação multiobjetivo;
-- otimização do cálculo de custo.
-
----
-
-# Referências
-
-- Atsushi Sakai — Python Robotics
-- Documentação oficial do CoppeliaSim
-- Dynamic Window Approach for Mobile Robots
-
----
-
-# Autor
-
-Projeto desenvolvido para fins acadêmicos na disciplina de Robótica.
+pip install numpy coppeliasim-zmqremoteapi-client
