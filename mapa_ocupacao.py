@@ -245,6 +245,79 @@ def construir_obstaculos_por_visao(sim, floor_handle, cfg=None, excluir=None):
 
 
 # ==========================================================================
+#  FALLBACK: OBSTACULOS POR BOUNDING BOX (varredura da arvore da cena)
+#  Usado apenas se a grade de ocupacao por visao falhar.
+# ==========================================================================
+def _descende_de(sim, handle, ancestral):
+    atual = handle
+    while atual != -1:
+        if atual == ancestral:
+            return True
+        atual = sim.getObjectParent(atual)
+    return False
+
+
+def _preenche_retangulo(pontos, min_x, max_x, min_y, max_y, passo=0.05):
+    x = min_x
+    while x <= max_x:
+        y = min_y
+        while y <= max_y:
+            pontos.append([x, y])
+            y += passo
+        x += passo
+
+
+def _bordas_retangulo(pontos, min_x, max_x, min_y, max_y, passo=0.06):
+    x = min_x
+    while x <= max_x:
+        pontos.append([x, min_y])
+        pontos.append([x, max_y])
+        x += passo
+    y = min_y
+    while y <= max_y:
+        pontos.append([min_x, y])
+        pontos.append([max_x, y])
+        y += passo
+
+
+def construir_obstaculos_por_bbox(sim, robot_handle, ignorar=("Floor", "box", "Goal", "Target")):
+    """Varre a arvore da cena e converte bounding boxes em pontos 2D."""
+    pontos = []
+
+    floor = sim.getObject("/Floor")
+    fp = sim.getObjectPosition(floor, -1)
+    _bordas_retangulo(
+        pontos,
+        fp[0] + sim.getObjectFloatParam(floor, sim.objfloatparam_objbbox_min_x),
+        fp[0] + sim.getObjectFloatParam(floor, sim.objfloatparam_objbbox_max_x),
+        fp[1] + sim.getObjectFloatParam(floor, sim.objfloatparam_objbbox_min_y),
+        fp[1] + sim.getObjectFloatParam(floor, sim.objfloatparam_objbbox_max_y),
+    )
+
+    for obj in sim.getObjectsInTree(sim.handle_scene):
+        if sim.getObjectType(obj) != sim.object_shape_type:
+            continue
+        if sim.getObjectAlias(obj, 0) in ignorar:
+            continue
+        if obj == robot_handle or _descende_de(sim, obj, robot_handle):
+            continue
+
+        pos = sim.getObjectPosition(obj, -1)
+        min_x = pos[0] + sim.getObjectFloatParam(obj, sim.objfloatparam_objbbox_min_x)
+        max_x = pos[0] + sim.getObjectFloatParam(obj, sim.objfloatparam_objbbox_max_x)
+        min_y = pos[1] + sim.getObjectFloatParam(obj, sim.objfloatparam_objbbox_min_y)
+        max_y = pos[1] + sim.getObjectFloatParam(obj, sim.objfloatparam_objbbox_max_y)
+
+        if (max_x - min_x) > 3.0 and (max_y - min_y) > 3.0:
+            continue  # ignora objetos gigantes (ceu, camera rig etc.)
+
+        _preenche_retangulo(pontos, min_x, max_x, min_y, max_y)
+
+    unicos = {(round(x, 2), round(y, 2)): [x, y] for x, y in pontos}
+    return np.array(list(unicos.values()), dtype=float)
+
+
+# ==========================================================================
 #  EXECUCAO ISOLADA (DEPURACAO)
 # ==========================================================================
 def _ascii_preview(grade, cols=60):

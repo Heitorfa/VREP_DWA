@@ -13,13 +13,19 @@ controlada por Python via **ZeroMQ Remote API**. Integra:
 
 Autor: **Heitor Freire Alves** — Disciplina de Robótica, UNIVASF.
 
+A cada simulação, uma janela exibe o **Mapa de Ocupação + Rota do Robô** (obstáculos, rota A*,
+pontos-chave, robô, goal e trajetória real), atualizada ao vivo e salva em `mapa_rota.png` ao final.
+
 ## 📁 Estrutura
 
 ```
-main.py                     # Loop principal (init, grade de ocupação, A*+DWA, atuação)
-dynamic_window_approach.py  # A* melhorado + DWAController
-mapa_ocupacao.py            # Sensor de visão + Mapa de Grade de Ocupação
+main.py                     # Robo (CoppeliaSim) + Navegador (A*+DWA) + loop principal
+dynamic_window_approach.py  # A* melhorado (heurística ponderada, pontos-chave, Bézier,
+                            #   penalidade de proximidade) + DWAController + planejar_rota
+mapa_ocupacao.py            # Sensor de visão + Mapa de Grade de Ocupação (+ fallback bbox)
+visualizacao.py             # Janela ao vivo: mapa de ocupação + rota + trajetória real
 utils/
+  testar_algoritmos.py      # Suíte de testes sintéticos (9 casos críticos, sem CoppeliaSim)
   testar_conexao.py         # Testa a conexão com o CoppeliaSim
   listar_objetos.py         # Lista os objetos da cena
 cenas/
@@ -49,7 +55,8 @@ pip install reportlab matplotlib python-pptx pillow
 1. Abra `cenas/scena com obstaculos.ttt` no CoppeliaSim.
 2. (Opcional) Teste a conexão: `python utils/testar_conexao.py`
 3. (Opcional) Visualize a grade de ocupação isoladamente: `python mapa_ocupacao.py`
-4. Rode a navegação: `python main.py`
+4. (Opcional) Rode a suíte de testes dos algoritmos: `python utils/testar_algoritmos.py`
+5. Rode a navegação: `python main.py`
 
 O script inicia a simulação em modo *stepping*, constrói a grade de ocupação, planeja a rota com o A*
 melhorado e navega até o `/Goal` com o DWA.
