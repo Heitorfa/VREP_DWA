@@ -1,12 +1,49 @@
+"""
+Algoritmos de planejamento de caminho para navegacao autonoma.
+
+Este modulo contem:
+
+  * DWAController  -> controlador reativo local (Dynamic Window Approach).
+  * AStarPlanner   -> planejador global A* MELHORADO conforme:
+
+        Guo, H. et al. (2024). "Path planning of greenhouse electric crawler
+        tractor based on the improved A* and DWA algorithms".
+        Computers and Electronics in Agriculture, 227, 109596.
+
+    As tres melhorias do artigo foram implementadas:
+
+      1. Heuristica ponderada:  f(n) = g(n) + (1 + d/D) * h(n)
+         onde d = distancia do no atual ao objetivo e D = distancia do
+         inicio ao objetivo. O peso varia de ~2 (perto do inicio, busca
+         rapida) a ~1 (perto do objetivo, caminho otimo).
+
+      2. Selecao de pontos-chave (key point selection):
+         (a) remocao de nos colineares redundantes;
+         (b) simplificacao por linha de visao (line-of-sight): se o segmento
+             entre o ponto anterior e o posterior a uma curva estiver livre
+             de obstaculos, a curva e descartada.
+
+      3. Suavizacao por curva de Bezier de 2a ordem:
+             B(t) = (1-t)^2 P0 + 2 t (1-t) P1 + t^2 P2 ,  t em [0, 1]
+
+    O metodo planning() devolve tanto o caminho denso suavizado (para
+    rastreamento com lookahead) quanto os pontos-chave (usados como metas
+    intermediarias do DWA na fusao dos dois algoritmos).
+"""
+
 import math
 
 import numpy as np
 
 
 def normalize_angle(angle):
+    """Normaliza um angulo para o intervalo [-pi, pi]."""
     return math.atan2(math.sin(angle), math.cos(angle))
 
 
+# ==========================================================================
+#  CONTROLADOR LOCAL - DYNAMIC WINDOW APPROACH (DWA)
+# ==========================================================================
 class DWAController:
     def __init__(self):
         self.max_speed = 0.35
@@ -20,9 +57,17 @@ class DWAController:
         self.dt = 0.1
         self.predict_time = 2.5
 
+        # robot_radius -> folga desejada (custo suave, mantem distancia).
+        # collision_radius -> raio de colisao REAL (menor); so abaixo dele a
+        # trajetoria e descartada. Isso permite aproximar-se de paredes quando
+        # o objetivo esta perto delas, sem congelar o robo.
         self.robot_radius = 0.24
+        self.collision_radius = 0.16
         self.safety_margin = 0.06
 
+        # Ganhos da funcao de custo. O termo "distance" (distancia final ao
+        # alvo local) corresponde ao termo key(v, w) do DWA melhorado do
+        # artigo: guia o robo ate o ponto-chave corrente do caminho global.
         self.to_goal_cost_gain = 0.25
         self.speed_cost_gain = 1.0
         self.obstacle_cost_gain = 0.45
@@ -85,11 +130,15 @@ class DWAController:
         stop_distance = (v * v) / (2.0 * self.max_accel) if self.max_accel > 0 else 0.0
         soft_clearance = self.robot_radius + self.safety_margin + 0.5 * stop_distance
 
-        if min_distance <= self.robot_radius:
+        # Colisao real apenas abaixo do raio de colisao (menor que a folga).
+        if min_distance <= self.collision_radius:
             return float("inf")
 
-        cost = 1.0 / (min_distance - self.robot_radius)
+        cost = 1.0 / (min_distance - self.collision_radius)
 
+        # Folga suave: penaliza (mas NAO proibe) aproximar-se de obstaculos,
+        # permitindo atravessar corredores estreitos e chegar a alvos junto
+        # a paredes.
         if min_distance < soft_clearance:
             cost += 8.0 * (soft_clearance - min_distance) / soft_clearance
 
@@ -137,6 +186,8 @@ class DWAController:
                     goal[0] - trajectory[-1, 0],
                     goal[1] - trajectory[-1, 1],
                 )
+                # Termo key(v, w) do artigo: distancia euclidiana do fim da
+                # trajetoria simulada ao alvo local (ponto-chave corrente).
                 distance_cost = self.distance_cost_gain * final_goal_distance
                 progress_reward = 2.0 * max(0.0, current_goal_distance - final_goal_distance)
                 total_cost = (
@@ -161,6 +212,9 @@ class DWAController:
         return best_u, best_trajectory
 
 
+# ==========================================================================
+#  PLANEJADOR GLOBAL - A* MELHORADO (Guo et al., 2024)
+# ==========================================================================
 class AStarPlanner:
     class Node:
         def __init__(self, x, y, cost, parent_index):
@@ -192,14 +246,15 @@ class AStarPlanner:
             [False for _ in range(self.y_width)] for _ in range(self.x_width)
         ]
 
-        inflation = math.ceil(self.rr / self.resolution)
+        self.inflation = math.ceil(self.rr / self.resolution)
+        self.last_plan_failed = False
 
         for iox, ioy in zip(ox, oy):
             center_x = self.calc_xy_index(iox, self.min_x)
             center_y = self.calc_xy_index(ioy, self.min_y)
 
-            for ix in range(center_x - inflation, center_x + inflation + 1):
-                for iy in range(center_y - inflation, center_y + inflation + 1):
+            for ix in range(center_x - self.inflation, center_x + self.inflation + 1):
+                for iy in range(center_y - self.inflation, center_y + self.inflation + 1):
                     if ix < 0 or iy < 0 or ix >= self.x_width or iy >= self.y_width:
                         continue
 
@@ -209,7 +264,18 @@ class AStarPlanner:
                     if math.hypot(iox - x, ioy - y) <= self.rr:
                         self.obstacle_map[ix][iy] = True
 
+    # ----------------------------------------------------------------------
+    #  Busca A* com heuristica ponderada (melhoria 1 do artigo)
+    # ----------------------------------------------------------------------
     def planning(self, sx, sy, gx, gy):
+        """Planeja o caminho de (sx, sy) ate (gx, gy).
+
+        Retorna quatro listas:
+            rx, ry      -> caminho denso suavizado por Bezier (rastreamento)
+            kx, ky      -> pontos-chave (metas intermediarias para o DWA)
+        Mantida a compatibilidade: os dois primeiros valores continuam sendo
+        o caminho (x, y). Os pontos-chave sao um retorno adicional.
+        """
         start = self.Node(
             self.calc_xy_index(sx, self.min_x),
             self.calc_xy_index(sy, self.min_y),
@@ -222,24 +288,38 @@ class AStarPlanner:
             0.0,
             -1,
         )
-        self.clear_cell(start.x, start.y, radius=2)
-        self.clear_cell(goal.x, goal.y, radius=2)
+        # Limpa uma vizinhanca do inicio e do objetivo proporcional a
+        # inflacao, garantindo que ambos fiquem sempre acessiveis (crucial
+        # quando o objetivo esta encostado numa parede).
+        self.last_plan_failed = False
+        limpeza = self.inflation + 1
+        self.clear_cell(start.x, start.y, radius=limpeza)
+        self.clear_cell(goal.x, goal.y, radius=limpeza)
+
+        # D = distancia do inicio ao objetivo (constante), usada no peso.
+        start_to_goal = math.hypot(goal.x - start.x, goal.y - start.y)
+        start_to_goal = max(start_to_goal, 1e-6)
 
         open_set = {self.calc_grid_index(start): start}
         closed_set = {}
 
         while open_set:
-            current_id = min(
-                open_set,
-                key=lambda key: open_set[key].cost
-                + math.hypot(goal.x - open_set[key].x, goal.y - open_set[key].y),
-            )
+            # f(n) = g(n) + (1 + d/D) * h(n), com h e d = distancia
+            # euclidiana (em celulas) do no ao objetivo.
+            def evaluation(key):
+                node = open_set[key]
+                d = math.hypot(goal.x - node.x, goal.y - node.y)
+                weight = 1.0 + d / start_to_goal
+                return node.cost + weight * d
+
+            current_id = min(open_set, key=evaluation)
             current = open_set[current_id]
 
             if current.x == goal.x and current.y == goal.y:
                 goal.parent_index = current.parent_index
                 goal.cost = current.cost
-                return self.calc_final_path(goal, closed_set)
+                rx, ry = self.calc_final_path(goal, closed_set)
+                return self.post_process(rx, ry)
 
             del open_set[current_id]
             closed_set[current_id] = current
@@ -254,9 +334,142 @@ class AStarPlanner:
                 if node_id not in open_set or open_set[node_id].cost > node.cost:
                     open_set[node_id] = node
 
-        print("A* falhou; usando Goal direto.")
-        return [sx, gx], [sy, gy]
+        # Nenhuma rota encontrada com esta margem de inflacao.
+        self.last_plan_failed = True
+        straight_x, straight_y = [sx, gx], [sy, gy]
+        return self.post_process(straight_x, straight_y)
 
+    # ----------------------------------------------------------------------
+    #  Pos-processamento: pontos-chave + suavizacao (melhorias 2 e 3)
+    # ----------------------------------------------------------------------
+    def post_process(self, rx, ry):
+        """Aplica selecao de pontos-chave e suavizacao Bezier.
+
+        Recebe o caminho bruto (centros de celula) e retorna:
+            sx, sy  -> caminho denso suavizado
+            kx, ky  -> pontos-chave (para o DWA)
+        """
+        path = list(zip(rx, ry))
+
+        if len(path) <= 2:
+            kx = [p[0] for p in path]
+            ky = [p[1] for p in path]
+            return rx, ry, kx, ky
+
+        # Melhoria 2a: remove nos colineares redundantes.
+        key_points = self._remove_collinear(path)
+
+        # Melhoria 2b: simplificacao por linha de visao.
+        key_points = self._line_of_sight_simplify(key_points)
+
+        # Melhoria 3: suavizacao por curva de Bezier de 2a ordem.
+        smooth = self._bezier_smooth(key_points)
+
+        sx = [p[0] for p in smooth]
+        sy = [p[1] for p in smooth]
+        kx = [p[0] for p in key_points]
+        ky = [p[1] for p in key_points]
+        return sx, sy, kx, ky
+
+    @staticmethod
+    def _remove_collinear(path, eps=1e-6):
+        """Mantem apenas os pontos de curva (remove colineares)."""
+        if len(path) <= 2:
+            return list(path)
+
+        result = [path[0]]
+        for i in range(1, len(path) - 1):
+            ax, ay = result[-1]
+            bx, by = path[i]
+            cx, cy = path[i + 1]
+            # Produto vetorial ~ 0 => tres pontos colineares.
+            cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+            if abs(cross) > eps:
+                result.append(path[i])
+        result.append(path[-1])
+        return result
+
+    def _line_of_sight_simplify(self, points):
+        """Remove curvas cujo 'atalho' (ponto anterior->posterior) e livre."""
+        if len(points) <= 2:
+            return list(points)
+
+        result = [points[0]]
+        i = 1
+        while i < len(points) - 1:
+            prev_point = result[-1]
+            next_point = points[i + 1]
+            # Se a linha reta entre o anterior e o proximo estiver livre, a
+            # curva atual e redundante e pode ser eliminada.
+            if self.is_line_free(prev_point, next_point):
+                i += 1  # pula o ponto atual (nao adiciona)
+            else:
+                result.append(points[i])
+                i += 1
+        result.append(points[-1])
+        return result
+
+    def is_line_free(self, p0, p1):
+        """Verifica se o segmento p0->p1 esta livre de obstaculos.
+
+        Amostra o segmento em passos de ~meia celula e consulta o mapa de
+        ocupacao inflado ja construido no __init__.
+        """
+        x0, y0 = p0
+        x1, y1 = p1
+        length = math.hypot(x1 - x0, y1 - y0)
+        steps = max(2, int(length / (self.resolution * 0.5)) + 1)
+
+        for s in range(steps + 1):
+            t = s / steps
+            x = x0 + (x1 - x0) * t
+            y = y0 + (y1 - y0) * t
+            ix = self.calc_xy_index(x, self.min_x)
+            iy = self.calc_xy_index(y, self.min_y)
+            if ix < 0 or iy < 0 or ix >= self.x_width or iy >= self.y_width:
+                return False
+            if self.obstacle_map[ix][iy]:
+                return False
+        return True
+
+    @staticmethod
+    def _bezier_smooth(points, samples=12, corner_ratio=0.35):
+        """Suaviza cada curva com uma Bezier de 2a ordem.
+
+        Para cada ponto interno P1 (curva), constroi-se uma Bezier
+        quadratica cujos extremos ficam sobre os segmentos vizinhos:
+            P0' = P1 + corner_ratio*(P_ant - P1)
+            P2' = P1 + corner_ratio*(P_prox - P1)
+            B(t) = (1-t)^2 P0' + 2 t (1-t) P1 + t^2 P2'
+        """
+        if len(points) <= 2:
+            return list(points)
+
+        pts = [np.array(p, dtype=float) for p in points]
+        smooth = [tuple(pts[0])]
+
+        for i in range(1, len(pts) - 1):
+            p_prev = pts[i - 1]
+            p_cur = pts[i]
+            p_next = pts[i + 1]
+
+            p0 = p_cur + corner_ratio * (p_prev - p_cur)
+            p2 = p_cur + corner_ratio * (p_next - p_cur)
+
+            # Reta de entrada ate o inicio do arco.
+            smooth.append(tuple(p0))
+            for s in range(1, samples):
+                t = s / samples
+                b = (1 - t) ** 2 * p0 + 2 * t * (1 - t) * p_cur + t ** 2 * p2
+                smooth.append(tuple(b))
+            smooth.append(tuple(p2))
+
+        smooth.append(tuple(pts[-1]))
+        return smooth
+
+    # ----------------------------------------------------------------------
+    #  Utilitarios da grade
+    # ----------------------------------------------------------------------
     def calc_final_path(self, goal, closed_set):
         rx = [self.calc_grid_position(goal.x, self.min_x)]
         ry = [self.calc_grid_position(goal.y, self.min_y)]

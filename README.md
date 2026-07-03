@@ -1,33 +1,71 @@
-# Navegação Autônoma de Robôs Móveis com A* e DWA no CoppeliaSim
+# Navegação Autônoma de Robôs Móveis — A* Melhorado + DWA + Grade de Ocupação (CoppeliaSim)
 
-Este repositório contém a implementação de um sistema híbrido de navegação autônoma para robôs móveis operando em ambiente simulado no CoppeliaSim. A arquitetura desenvolvida integra um planejador global de caminhos baseado no algoritmo **A*** com um controlador reativo local fundamentado na **Abordagem de Janela Dinâmica (Dynamic Window Approach - DWA)**. A comunicação e o controle do simulador são realizados em tempo real utilizando a **ZeroMQ Remote API** do CoppeliaSim.
+Sistema híbrido de navegação autônoma para uma base móvel diferencial simulada no **CoppeliaSim**,
+controlada por Python via **ZeroMQ Remote API**. Integra:
 
-## 🚀 Funcionalidades
+- **Planejador global A\* melhorado** (Guo et al., 2024): heurística ponderada `f(n)=g(n)+(1+d/D)·h(n)`,
+  seleção de pontos-chave (remoção de colineares + simplificação por linha de visão) e suavização por
+  **curvas de Bézier de 2ª ordem**.
+- **Mapa de Grade de Ocupação** construído por um **sensor de visão** criado por código, apontado para
+  baixo sobre a cena (modelo de Moravec & Elfes, 1985). É a **fonte primária de obstáculos** do A*.
+- **Controlador local DWA** (Dynamic Window Approach) com fusão guiada pelos pontos-chave do A* e camada
+  reativa por sensores de proximidade para obstáculos dinâmicos.
 
-- **Mapeamento e Planejamento Global (A*):** Varre a árvore de objetos do cenário para identificar obstáculos estáticos, inflar margens de segurança com base no raio do robô e gerar uma malha de waypoints otimizada até o objetivo final.
-- **Navegação Reativa Local (DWA):** Amostra o espaço de velocidades lineares e angulares dentro das restrições dinâmicas do robô, prevendo trajetórias e minimizando uma função de custo multiobjetivo.
-- **Fusão de Sensores em Tempo Real:** Combina a geometria de obstáculos estáticos mapeados com leituras dinâmicas de sensores de proximidade ultrassônicos para evasão de colisões imprevistas.
-- **Salvaguarda Mecânica (Controle de Emergência):** Em cenários de bloqueio ou alto custo de colisão, o controlador assume uma manobra de rotação forçada no próprio eixo para reorientar a base móvel.
+Autor: **Heitor Freire Alves** — Disciplina de Robótica, UNIVASF.
 
-## 📁 Estrutura do Projeto
+## 📁 Estrutura
 
-O sistema é dividido em dois módulos principais interdependentes:
-
-1. **`script_mirror.py` (Módulo de Integração e Simulação):** - Gerencia o ciclo de vida da simulação no CoppeliaSim.
-   - Realiza a varredura do ambiente para extração de obstáculos estáticos e leitura dos sensores de proximidade.
-   - Implementa o loop principal de controle e faz o rastreamento de progresso ao longo dos waypoints gerados pelo A*.
-2. **`dynamic_window_approach.py` (Módulo Algorítmico):**
-   - Contém a classe `AStarPlanner` para o cálculo da rota global ideal.
-   - Contém a classe `DWAController` responsável pelo cálculo do espaço vetorial de comandos válidos $[v, \omega]$, simulação de trajetórias dinâmicas futuras e minimização das funções de custo.
+```
+main.py                     # Loop principal (init, grade de ocupação, A*+DWA, atuação)
+dynamic_window_approach.py  # A* melhorado + DWAController
+mapa_ocupacao.py            # Sensor de visão + Mapa de Grade de Ocupação
+utils/
+  testar_conexao.py         # Testa a conexão com o CoppeliaSim
+  listar_objetos.py         # Lista os objetos da cena
+cenas/
+  scena com obstaculos.ttt  # Cena oficial
+docs/
+  Relatorio_Final_Navegacao_Autonoma.pdf   # Relatório final
+  Apresentacao_Navegacao_Autonoma.pptx     # Apresentação
+  artigo_Guo2024_improved_Astar_DWA.pdf    # Artigo de referência
+  figuras/                                 # Figuras geradas para o relatório
+legado/                     # Arquivos antigos preservados (não usados)
+```
 
 ## 🛠️ Pré-requisitos
 
-Antes de executar, certifique-se de possuir as seguintes ferramentas instaladas:
+- Python 3.8+
+- CoppeliaSim (compatível com a ZeroMQ Remote API)
 
-- Python 3.8 ou superior
-- NumPy
-- CoppeliaSim (versão moderna compatível com ZeroMQ Remote API)
-
-Instale as dependências via pip:
+Instale as dependências:
 ```bash
 pip install numpy coppeliasim-zmqremoteapi-client
+# Opcional, apenas para regenerar relatório/figuras/apresentação:
+pip install reportlab matplotlib python-pptx pillow
+```
+
+## ▶️ Como executar
+
+1. Abra `cenas/scena com obstaculos.ttt` no CoppeliaSim.
+2. (Opcional) Teste a conexão: `python utils/testar_conexao.py`
+3. (Opcional) Visualize a grade de ocupação isoladamente: `python mapa_ocupacao.py`
+4. Rode a navegação: `python main.py`
+
+O script inicia a simulação em modo *stepping*, constrói a grade de ocupação, planeja a rota com o A*
+melhorado e navega até o `/Goal` com o DWA.
+
+## ⚙️ Ajustes úteis
+
+- **Se o robô andar "de costas":** troque `SINAL_FRENTE = +1` para `-1` no topo de `main.py`
+  (a frente é detectada automaticamente pelo sensor dianteiro, mas isso inverte 180° se necessário).
+- **Grade de ocupação:** parâmetros em `mapa_ocupacao.py` → classe `ConfigGrade`
+  (`resolucao`, `altura`, `altura_min_obstaculo`, `flip_x`, `flip_y`). Se a grade sair espelhada em
+  relação à cena, ajuste `flip_x` / `flip_y`.
+- **Comportamento do DWA:** ganhos em `DWAController.__init__` (`dynamic_window_approach.py`).
+
+## 📚 Referências
+
+- GUO, H. et al. *Path planning of greenhouse electric crawler tractor based on the improved A\* and DWA
+  algorithms.* Computers and Electronics in Agriculture, v. 227, 109596, 2024.
+- MORAVEC, H.; ELFES, A. *High resolution maps from wide angle sonar.* Proc. 1985 IEEE ICRA, p. 116-121.
+- FOX, D.; BURGARD, W.; THRUN, S. *The Dynamic Window Approach to Collision Avoidance.* IEEE R&A Mag., 1997.
